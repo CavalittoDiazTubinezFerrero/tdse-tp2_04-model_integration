@@ -1,3 +1,99 @@
+1. Archivos a analizar
+- task_actuator.c
+- task_actuator_attribute.h
+- task_actuator_interface.h
+- task_actuator.png
+
+2. Tipos de datos y estructuras (task_actuator_attribute.h)
+- Enumeración de EVENTOS (`task_actuator_ev_t`)
+  * EV_LED_XX_OFF
+  * EV_LED_XX_ON
+  * EV_LED_XX_NOT_BLINK
+  * EV_LED_XX_BLINK
+  * EV_LED_XX_PULSE
+
+- Enumeración de ESTADOS (`task_actuator_st_t`)
+  * ST_LED_XX_OFF
+  * ST_LED_XX_ON
+  * ST_LED_XX_BLINK_ON
+  * ST_LED_XX_BLINK_OFF
+  * ST_LED_XX_PULSE
+
+- Identificador (`task_actuator_id_t`)
+  * ID_LED_A
+
+- Configuración (`task_actuator_cfg_t`)
+  Contiene parámetros físicos del actuador:
+  * identifier: ID del actuador
+  * gpio_port, pin
+  * led_on, led_off
+  * tick_blink, tick_pulse
+
+- Datos dinámicos (`task_actuator_dta_t`)
+  * tick: contador de retardo
+  * state: estado actual (FSM)
+  * event: último evento recibido
+  * flag: indica si hay evento pendiente
+
+Array de datos:
+`task_actuator_dta_list[]` almacena el estado y tick de cada actuador.
+
+Array de configuración:
+`task_actuator_cfg_list[]` describe hardware (LED_A) y tiempos de blink/pulse.
+
+
+3. Variables globales (task_actuator.h, task_actuator.c)
+
+- `uint32_t g_task_actuator_cnt`
+  Contador de ejecuciones de la tarea Actuator.
+
+- `volatile uint32_t g_task_actuator_tick_cnt`
+  Contador de ticks (control de temporización no bloqueante).
+
+Ambos permiten medir frecuencia de ejecución y temporización.
+
+
+4. Patrón de diseño
+
+- **Finite State Machine (FSM)**:
+  Transiciones definidas en la State Transition Table del archivo `task_actuator_attribute.h`.
+  El estado actual + evento + tick determinan la acción (encender, apagar, parpadear, pulsar LED).
+
+- **Non-Blocking Design**:
+  Se usan contadores `tick--` en vez de retardos bloqueantes.
+  Permite ejecutar otras tareas en paralelo.
+
+- **Event Queue**:
+  `flag` y `event` desacoplan la llegada de eventos (por ejemplo, solicitud de parpadeo) de la reacción.
+
+- **Separation of Concerns**:
+  Lógica de control en `task_actuator_statechart()`.
+  Ejecución física (encender/apagar LED) mediante `HAL_GPIO_WritePin()`.
+
+
+5. Flujo principal
+- `task_actuator_init()`:
+  Inicializa estados, eventos y salidas físicas del LED.
+
+- `task_actuator_update()`:
+  Se llama periódicamente.
+  Disminuye `g_task_actuator_tick_cnt`.
+  Ejecuta la FSM (`task_actuator_statechart()`) cuando corresponde.
+
+- `task_actuator_statechart()`:
+  Implementa las transiciones de estado:
+    * ST_LED_XX_OFF → (EV_LED_XX_ON) → ST_LED_XX_ON
+    * ST_LED_XX_OFF → (EV_LED_XX_BLINK) → ST_LED_XX_BLINK_ON
+    * ST_LED_XX_OFF → (EV_LED_XX_PULSE) → ST_LED_XX_PULSE
+    * ST_LED_XX_BLINK_ON ↔ ST_LED_XX_BLINK_OFF (tick)
+    * ST_LED_XX_PULSE → (tick==0) → ST_LED_XX_OFF
+    * Estados ON/OFF responden a eventos EV_LED_XX_OFF / EV_LED_XX_ON.
+
+- `put_event_task_actuator()`:
+  (en task_actuator_interface.c)
+  Carga un evento y activa `flag` para ser procesado en la próxima actualización.
+
+
 ANÁLISIS DE LA VARIABLE g_app_runtime_us
 - Variable global definida en `app_update()`.
 - Mide el tiempo total de ejecución de la aplicación en microsegundos.
